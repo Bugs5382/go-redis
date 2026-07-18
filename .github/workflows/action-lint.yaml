@@ -1,0 +1,32 @@
+name: Actionlint
+# Validate the GitHub Actions workflow files. The other PR checks don't verify
+# that a workflow is actually runnable, so a malformed one (e.g. an invalid job
+# id) can merge green and only fail at startup on main. actionlint catches that
+# class at PR time. shellcheck integration is disabled (-shellcheck=) to keep
+# the gate focused on workflow validity; drop that flag to also lint run: shell.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths: ['.github/workflows/**']
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  actionlint:
+    name: 🧹 Actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      - name: 🐹 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "stable"
+      - name: 🧹 Run actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          "$(go env GOPATH)/bin/actionlint" -color -shellcheck=
