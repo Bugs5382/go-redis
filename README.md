@@ -27,6 +27,22 @@ rdb.Set(ctx, "session:123", "alice", time.Minute)
 name, _ := rdb.Get(ctx, "session:123").Result()
 ```
 
+## 🧩 Depend on go-redis only
+
+`Nil`, `Cmdable`, and `UniversalClient` re-export the handful of go-redis
+names a caller needs in order to *name* the value `Redis()` returns, so a
+wrapper library can depend on `go-redis` alone and never import
+`github.com/redis/go-redis/v9` directly:
+
+```go
+var cmd redis.Cmdable = client.Redis() // or redis.UniversalClient
+
+_, err := cmd.Get(ctx, "session:missing").Result()
+if errors.Is(err, redis.Nil) {
+	// cache miss
+}
+```
+
 ## 🛟 High availability
 
 Point at Redis Sentinel for automatic failover — the client discovers the

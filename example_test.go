@@ -25,6 +25,7 @@ OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -73,5 +74,24 @@ func ExampleConnect_sentinel() {
 
 	if client.Healthy(ctx) {
 		fmt.Println("ready")
+	}
+}
+
+// Name the command surface with this package's own alias -- Cmdable -- and
+// check a miss against the re-exported Nil sentinel. Neither line requires
+// importing github.com/redis/go-redis/v9.
+func ExampleClient_Redis() {
+	ctx := context.Background()
+
+	client, err := redis.Connect(ctx, redis.WithAddr("localhost:6379"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	var cmd redis.Cmdable = client.Redis()
+	_, err = cmd.Get(ctx, "session:missing").Result()
+	if errors.Is(err, redis.Nil) {
+		fmt.Println("cache miss")
 	}
 }

@@ -5,6 +5,11 @@
 // a sentinel-managed failover master, or a cluster, and tune pool, timeouts,
 // retries, TLS, and pluggable Logger/Observer hooks. The returned Client exposes
 // the underlying go-redis UniversalClient for the full command API.
+//
+// Nil, Cmdable, and UniversalClient re-export the handful of go-redis names a
+// caller needs to work with Client.Redis's return value -- the miss sentinel
+// and the command/client interfaces -- so a consumer of this package never
+// needs to import github.com/redis/go-redis/v9 directly.
 package redis
 
 /*
