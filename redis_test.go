@@ -25,6 +25,7 @@ OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -82,9 +83,14 @@ func TestConnectGetSet(t *testing.T) {
 		t.Errorf("Get = %q, want %q", got, "alice")
 	}
 
-	// A missing key surfaces as goredis.Nil, not a transport failure.
+	// A missing key surfaces as goredis.Nil, not a transport failure. The
+	// re-exported Nil is the same sentinel, so a caller can check it without
+	// importing goredis directly.
 	if _, err := rdb.Get(ctx, "session:absent").Result(); err != goredis.Nil {
 		t.Errorf("missing key err = %v, want goredis.Nil", err)
+	}
+	if _, err := rdb.Get(ctx, "session:absent").Result(); !errors.Is(err, Nil) {
+		t.Errorf("missing key err = %v, want errors.Is(err, Nil)", err)
 	}
 }
 
@@ -224,5 +230,39 @@ func TestSentinelBuildsFailoverClient(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("sentinel Connect against no sentinel should fail")
+	}
+}
+
+// TestNilIsGoredisNil proves the re-exported sentinel is identical to the
+// upstream one, so replacing a direct goredis.Nil comparison with this
+// package's Nil changes nothing at runtime.
+func TestNilIsGoredisNil(t *testing.T) {
+	if Nil != goredis.Nil {
+		t.Fatalf("Nil = %v, want goredis.Nil (%v)", Nil, goredis.Nil)
+	}
+	if !errors.Is(goredis.Nil, Nil) {
+		t.Error("errors.Is(goredis.Nil, Nil) = false, want true")
+	}
+}
+
+// TestClientRedisSatisfiesAliases proves, at compile time, that
+// Client.Redis's return value satisfies both the UniversalClient and Cmdable
+// aliases -- the exact shapes a downstream consumer names without importing
+// github.com/redis/go-redis/v9.
+func TestClientRedisSatisfiesAliases(t *testing.T) {
+	t.Parallel()
+	m := newServer(t)
+	ctx := context.Background()
+
+	c, err := Connect(ctx, WithAddr(m.Addr()))
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	uc := c.Redis() // static type is the UniversalClient alias
+	var cmd Cmdable = uc
+	if err := cmd.Set(ctx, "k", "v", 0).Err(); err != nil {
+		t.Fatalf("Set via Cmdable alias: %v", err)
 	}
 }

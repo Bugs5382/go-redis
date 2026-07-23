@@ -32,6 +32,25 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
+// Nil is the sentinel error go-redis returns when a command finds no result
+// (for example GET on a missing key). It is re-exported here so a caller can
+// write errors.Is(err, redis.Nil) without importing
+// github.com/redis/go-redis/v9 directly.
+var Nil = goredis.Nil
+
+// Cmdable is the full go-redis command surface (Get, Set, pipelines, pub/sub,
+// scripts, and so on), re-exported as a type alias so a caller can name it --
+// for example to store the result of Client.Redis in a typed field or accept
+// it as a function parameter -- without importing
+// github.com/redis/go-redis/v9 directly.
+type Cmdable = goredis.Cmdable
+
+// UniversalClient is the client-mode-agnostic go-redis interface (standalone,
+// sentinel-failover, or cluster) that Client wraps, re-exported as a type
+// alias for the same reason as Cmdable. It embeds Cmdable and additionally
+// exposes hooks, transactions, pub/sub, and pool stats.
+type UniversalClient = goredis.UniversalClient
+
 // Client is a thin, resilient wrapper over a go-redis UniversalClient. Build one
 // with Connect; use Redis to reach the full go-redis command API, Healthy for a
 // liveness probe, and Close to release the pool. A Client is safe for concurrent
@@ -84,11 +103,11 @@ func Connect(ctx context.Context, opts ...Option) (*Client, error) {
 	return &Client{uc: uc}, nil
 }
 
-// Redis returns the underlying go-redis UniversalClient so callers can use the
-// full command API (Get, Set, pipelines, pub/sub, scripts, and so on). The
-// returned value is owned by this Client; do not Close it directly -- use
-// Client.Close.
-func (c *Client) Redis() goredis.UniversalClient { return c.uc }
+// Redis returns the underlying client as the UniversalClient alias so callers
+// can use the full command API (Get, Set, pipelines, pub/sub, scripts, and so
+// on) while naming only this package's exported types. The returned value is
+// owned by this Client; do not Close it directly -- use Client.Close.
+func (c *Client) Redis() UniversalClient { return c.uc }
 
 // Healthy reports whether the server answers a Ping within ctx. It is cheap and
 // suitable for readiness and liveness probes.
