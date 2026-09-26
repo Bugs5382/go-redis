@@ -251,6 +251,16 @@ type nopObserver struct{}
 func (nopObserver) ObserveCommand(context.Context, string, time.Duration, error)      {}
 func (nopObserver) ObserveDial(context.Context, string, string, time.Duration, error) {}
 
+// goRedisMaxRetries translates maxRetries into go-redis terms. go-redis reads
+// MaxRetries 0 as "use the default of 3" and -1 as "no retries", so the 0 that
+// WithRetry documents as "disable retries" must be sent as -1 (#20).
+func (c *config) goRedisMaxRetries() int {
+	if c.maxRetries == 0 {
+		return -1
+	}
+	return c.maxRetries
+}
+
 // standaloneOptions maps the config onto go-redis standalone options.
 func (c *config) standaloneOptions() *goredis.Options {
 	addr := defaultAddr
@@ -266,7 +276,7 @@ func (c *config) standaloneOptions() *goredis.Options {
 		DialTimeout:     c.dialTimeout,
 		ReadTimeout:     c.readTimeout,
 		WriteTimeout:    c.writeTimeout,
-		MaxRetries:      c.maxRetries,
+		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
 	}
@@ -284,7 +294,7 @@ func (c *config) failoverOptions() *goredis.FailoverOptions {
 		DialTimeout:     c.dialTimeout,
 		ReadTimeout:     c.readTimeout,
 		WriteTimeout:    c.writeTimeout,
-		MaxRetries:      c.maxRetries,
+		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
 	}
@@ -301,7 +311,7 @@ func (c *config) clusterOptions() *goredis.ClusterOptions {
 		DialTimeout:     c.dialTimeout,
 		ReadTimeout:     c.readTimeout,
 		WriteTimeout:    c.writeTimeout,
-		MaxRetries:      c.maxRetries,
+		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
 	}
