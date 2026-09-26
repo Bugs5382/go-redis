@@ -27,12 +27,12 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/redis/go-redis/extra/rediscmd/v9 v9.21.0 h1:jsV3tyMeJrEoc2f3EhNf7qoBW3NEZW7l/4ziT3M+OJI=
-github.com/redis/go-redis/extra/rediscmd/v9 v9.21.0/go.mod h1:e5t17bY9cEpVV+xw2U7jsPOKkXBtL5IQmNVABShnHUk=
-github.com/redis/go-redis/extra/redisotel/v9 v9.21.0 h1:36qq3rbF2If2CP0zGHHF8o/4XDluErn6DD0c9/L2iNI=
-github.com/redis/go-redis/extra/redisotel/v9 v9.21.0/go.mod h1:7y2cVB/LXXLHqHOO2jCVzBqimIQk1w7Rp9WSpyVY/o8=
-github.com/redis/go-redis/v9 v9.21.0 h1:FPBE4hhbAke+TLmcY3WkpbDffJEomdqPn3HYiqAtL9E=
-github.com/redis/go-redis/v9 v9.21.0/go.mod h1:v/M13XI1PVCDcm01VtPFOADfZtHf8YW3baQf57KlIkA=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.22.0 h1:MQPzEEnpD0BMPufBLABnMYLJVwM7xi7vZ+srO8Nr0s8=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.22.0/go.mod h1:eve0JFcLRwFVj3RA85rrrV5+UJ+K9LDyU7kf2UdSueM=
+github.com/redis/go-redis/extra/redisotel/v9 v9.22.0 h1:t5ul1Gl0o1rYQj5f5bK12G9xcg1niq2ON4yZFjvy1kA=
+github.com/redis/go-redis/extra/redisotel/v9 v9.22.0/go.mod h1:hcS9L2RBBjYXkrfSOF26ZGejgo+yOC+28ZD2fkk3sGs=
+github.com/redis/go-redis/v9 v9.22.0 h1:laDvpYXTJtZLloinw1fA5Kqd6HAEH2XKxOkG/PDq2F0=
+github.com/redis/go-redis/v9 v9.22.0/go.mod h1:y2g0Wj8rQvuK0ELM+oxSudcLtC09JScs98I/X9gRWY4=
 github.com/rs/zerolog v1.35.1 h1:m7xQeoiLIiV0BCEY4Hs+j2NG4Gp2o2KPKmhnnLiazKI=
 github.com/rs/zerolog v1.35.1/go.mod h1:EjML9kdfa/RMA7h/6z6pYmq1ykOuA8/mjWaEvGI+jcw=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
@@ -49,6 +49,8 @@ go.opentelemetry.io/otel/metric v1.44.0 h1:1w0gILTcHdr3YI+ixLyjemwrVnsMURbTZFrSY
 go.opentelemetry.io/otel/metric v1.44.0/go.mod h1:8O7hanEPBNgEMmybD3s2VBKcgWOCsA6tzHBPODAiquo=
 go.opentelemetry.io/otel/sdk v1.43.0 h1:pi5mE86i5rTeLXqoF/hhiBtUNcrAGHLKQdhg4h4V9Dg=
 go.opentelemetry.io/otel/sdk v1.43.0/go.mod h1:P+IkVU3iWukmiit/Yf9AWvpyRDlUeBaRg6Y+C58QHzg=
+go.opentelemetry.io/otel/sdk/metric v1.43.0 h1:S88dyqXjJkuBNLeMcVPRFXpRw2fuwdvfCGLEo89fDkw=
+go.opentelemetry.io/otel/sdk/metric v1.43.0/go.mod h1:C/RJtwSEJ5hzTiUz5pXF1kILHStzb9zFlIEe85bhj6A=
 go.opentelemetry.io/otel/trace v1.44.0 h1:jxF5CsGYCe74MCRx2X4g7WsY/VBKRqqpNvXlX/6gtIk=
 go.opentelemetry.io/otel/trace v1.44.0/go.mod h1:oLl1jrMQAVo6v3GAggN+1VH9VIz9iUSvW53sW1Q8PIE=
 go.uber.org/atomic v1.11.0 h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=
