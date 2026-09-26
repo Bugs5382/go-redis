@@ -35,7 +35,9 @@ The public surface is small and additive; keep it stable:
 - `otel/` - the optional OpenTelemetry adapter (`Instrument`), a separate import path.
 - `doc.go` - package doc.
 - `*_test.go` - unit tests using `alicebob/miniredis` (no live Redis); `integration_test.go` is behind
-  `//go:build integration` and reads `REDIS_ADDR`.
+  `//go:build integration` and reads `REDIS_ADDR`. CI runs the integration tests against a `redis:7`
+  service container (`.github/workflows/job-go-integration.yaml`) with `REDIS_TEST_REQUIRED=1`, which
+  makes a missing `REDIS_ADDR` fail instead of skip.
 
 ## Build, test, lint
 
