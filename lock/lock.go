@@ -193,12 +193,15 @@ func Acquire(ctx context.Context, c *redis.Client, key string, ttl time.Duration
 			}
 			return lk, nil
 		}
-		if o.wait == 0 || !time.Now().Add(delay).Before(deadline) {
+		remaining := time.Until(deadline)
+		if o.wait == 0 || remaining <= 0 {
 			l.Debug("lock: held elsewhere, giving up", log.F("attempts", attempt), log.F("waited", time.Since(start)))
 			return nil, ErrNotAcquired
 		}
-		l.Debug("lock: held elsewhere, waiting", log.F("attempt", attempt), log.F("backoff", delay))
-		t := time.NewTimer(delay)
+		// Sleep to the next attempt, or to the deadline for one last try.
+		nap := min(delay, remaining)
+		l.Debug("lock: held elsewhere, waiting", log.F("attempt", attempt), log.F("backoff", nap))
+		t := time.NewTimer(nap)
 		select {
 		case <-ctx.Done():
 			t.Stop()
