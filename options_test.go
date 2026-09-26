@@ -27,6 +27,8 @@ import (
 	"crypto/tls"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 func TestDefaults(t *testing.T) {
@@ -127,6 +129,50 @@ func TestRetryZeroDisables(t *testing.T) {
 	t.Parallel()
 	if c := apply(WithRetry(0, 0, 0)); c.maxRetries != 0 {
 		t.Errorf("WithRetry(0,...) should disable retries, got maxRetries=%d", c.maxRetries)
+	}
+}
+
+// TestRetryZeroReachesGoRedis checks the value go-redis ends up with, not just
+// the internal config: go-redis reads MaxRetries 0 as "default (3)" and only
+// -1 as "no retries" (#20).
+func TestRetryZeroReachesGoRedis(t *testing.T) {
+	t.Parallel()
+	for name, opts := range map[string][]Option{
+		"standalone": {WithAddr("localhost:6379")},
+		"sentinel":   {WithSentinel("mymaster", "localhost:26379")},
+		"cluster":    {WithCluster("localhost:7000")},
+	} {
+		c := apply(append(opts, WithRetry(0, 0, 0))...)
+		var got int
+		switch name {
+		case "standalone":
+			got = c.standaloneOptions().MaxRetries
+		case "sentinel":
+			got = c.failoverOptions().MaxRetries
+		case "cluster":
+			got = c.clusterOptions().MaxRetries
+		}
+		if got != -1 {
+			t.Errorf("%s: go-redis MaxRetries = %d, want -1 (disabled)", name, got)
+		}
+	}
+
+	// And the constructed client really has retries off.
+	zero := apply(WithRetry(0, 0, 0))
+	rc := goredis.NewClient(zero.standaloneOptions())
+	defer func() { _ = rc.Close() }()
+	if n := rc.Options().MaxRetries; n != 0 {
+		t.Errorf("client MaxRetries after go-redis defaults = %d, want 0", n)
+	}
+
+	// The default and explicit counts are unchanged.
+	def := apply()
+	if n := def.standaloneOptions().MaxRetries; n != defaultMaxRetries {
+		t.Errorf("default MaxRetries = %d, want %d", n, defaultMaxRetries)
+	}
+	five := apply(WithRetry(5, 0, 0))
+	if n := five.clusterOptions().MaxRetries; n != 5 {
+		t.Errorf("WithRetry(5) MaxRetries = %d, want 5", n)
 	}
 }
 
