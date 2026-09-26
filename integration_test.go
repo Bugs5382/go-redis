@@ -62,7 +62,7 @@ func TestIntegrationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	if !c.Healthy(ctx) {
 		t.Fatal("server not healthy")
