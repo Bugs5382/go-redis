@@ -4,12 +4,13 @@ name: Actionlint
 # id) can merge green and only fail at startup on main. actionlint catches that
 # class at PR time. shellcheck integration is disabled (-shellcheck=) to keep
 # the gate focused on workflow validity; drop that flag to also lint run: shell.
+#
+# Pull requests only, and not while the PR is a draft; the PR run covers what
+# merges, so nothing reruns on push to main.
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-    paths: ['.github/workflows/**']
+    types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -18,7 +19,9 @@ permissions:
 jobs:
   actionlint:
     name: 🧹 Actionlint
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4

@@ -3,12 +3,13 @@ name: Integration
 # container. REDIS_TEST_REQUIRED makes a missing REDIS_ADDR fail the run instead
 # of skipping every test, so broken service wiring shows up as a red job rather
 # than a green run of skipped tests.
+#
+# Pull requests only, and not while the PR is a draft; the PR run covers what
+# merges, so nothing reruns on push to main.
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
-    paths-ignore: ['**.md']
+    types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -17,6 +18,7 @@ permissions:
 jobs:
   integration:
     name: 🧱 Integration (Redis)
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
