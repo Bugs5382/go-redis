@@ -17,6 +17,10 @@ The public surface is small and additive; keep it stable:
 
 - `Connect(ctx, ...Option) (*Client, error)` -- builds the underlying go-redis client (standalone,
   sentinel, or cluster), applies resilient defaults, and Pings to verify readiness before returning.
+- `WaitFor(ctx, fn, ...WaitOption) error` -- retries `fn` (a `Connect` call at startup) while its
+  error is `Transient(err) bool` (network failures and the LOADING, MASTERDOWN, TRYAGAIN and
+  CLUSTERDOWN replies), with capped exponential backoff and jitter; any other error returns at
+  once. Options: `WithWaitBackoff(base, max)`, `WithRetryHook(func(attempt, err, delay))`.
 - `(*Client).Redis() redis.UniversalClient` -- the underlying go-redis client for the full command
   API. `(*Client).Healthy(ctx) bool` -- a cheap Ping for probes. `(*Client).Close() error`.
 - Options: `WithAddr`, `WithSentinel(master, addrs...)` (the HA path), `WithCluster`, `WithPassword`,

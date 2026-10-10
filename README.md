@@ -95,6 +95,27 @@ if !client.Healthy(ctx) {
 }
 ```
 
+## ⏳ Waiting for the server at startup
+
+`Connect` pings once, so a service that starts before Redis or Valkey answers
+(after a reboot, say) gets an error. `WaitFor` retries while the error is
+`Transient` (network failures, and the `LOADING`, `MASTERDOWN`, `TRYAGAIN` and
+`CLUSTERDOWN` replies), with capped exponential backoff and jitter. Anything
+else, such as `WRONGPASS`, is returned at once.
+
+```go
+var client *redis.Client
+err := redis.WaitFor(ctx, func(ctx context.Context) error {
+	c, err := redis.Connect(ctx, redis.WithAddr("cache.example.org:6379"))
+	client = c
+	return err
+}, redis.WithRetryHook(func(attempt int, err error, delay time.Duration) {
+	logger.Warn("redis not reachable yet, retrying", "attempt", attempt, "in", delay, "err", err)
+}))
+```
+
+`WithWaitBackoff(base, max)` tunes the waits (default 500ms doubling to 15s).
+
 ## 🔌 Logging & metrics
 
 A minimal `Logger` (dial diagnostics) and `Observer` (per-command and per-dial
