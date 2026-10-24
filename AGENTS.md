@@ -22,10 +22,16 @@ The public surface is small and additive; keep it stable:
   CLUSTERDOWN replies), with capped exponential backoff and jitter; any other error returns at
   once. Options: `WithWaitBackoff(base, max)`, `WithRetryHook(func(attempt, err, delay))`.
 - `(*Client).Redis() redis.UniversalClient` -- the underlying go-redis client for the full command
-  API. `(*Client).Healthy(ctx) bool` -- a cheap Ping for probes. `(*Client).Close() error`.
+  API. `(*Client).Healthy(ctx) bool` -- a Ping for probes. `(*Client).Close() error` (also closes
+  the FastFail view).
+- `(*Client).FastFail() *Client` -- a lazily built, shared view with its own pool: no command
+  retries, one dial attempt, and the `WithFastFail` budget (default 200ms) on the dial, read, write
+  and pool timeouts. For health probes and fail-open paths. The parent owns it (`Close` on the view
+  is a no-op); it inherits the Logger/Observer hook, but `otel.Instrument` is per `*Client`.
 - Options: `WithAddr`, `WithSentinel(master, addrs...)` (the HA path), `WithCluster`, `WithPassword`,
   `WithDB`, `WithTLS`, `WithPool`, `WithTimeouts(dial, read, write)`, `WithRetry(attempts, min, max)`,
-  `WithLogger`, `WithObserver`. Non-positive tuning values keep the default; the last mode option wins.
+  `WithDialRetry(attempts, backoff)` (the go-redis dial loop; defaults 5 and 100ms, set explicitly),
+  `WithFastFail(timeout)`, `WithLogger`, `WithObserver`. Non-positive tuning values keep the default; the last mode option wins.
 - `Logger` and `Observer` are minimal, default to no-ops, and impose no logging/telemetry dependency.
 - The `otel` subpackage adds OpenTelemetry tracing and metrics via `Instrument`, keeping the
   OpenTelemetry dependency out of the core.
@@ -36,7 +42,7 @@ The public surface is small and additive; keep it stable:
 
 ## Layout
 
-- `redis.go` - `Client`, `Connect`, the `Redis`/`Healthy`/`Close` methods, and the go-redis hook that
+- `redis.go` - `Client`, `Connect`, the `Redis`/`Healthy`/`FastFail`/`Close` methods, and the go-redis hook that
   drives `Logger`/`Observer`.
 - `options.go` - the `Option` type, all `With*` options, the resilient defaults, and the mapping onto
   go-redis's standalone/failover/cluster option structs.

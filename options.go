@@ -52,6 +52,20 @@ const (
 	defaultMaxRetries      = 3
 	defaultMinRetryBackoff = 8 * time.Millisecond
 	defaultMaxRetryBackoff = 512 * time.Millisecond
+
+	// defaultDialAttempts and defaultDialRetryBackoff are go-redis's own dial
+	// loop defaults, made explicit here: each new connection is tried up to
+	// five times with 100ms between tries, so one failed dial costs at least
+	// 400ms. That patience rides out a restart, but it is what makes every
+	// call slow while the server is down. FastFail uses a single attempt.
+	defaultDialAttempts     = 5
+	defaultDialRetryBackoff = 100 * time.Millisecond
+
+	// defaultFastFailTimeout is the per-operation budget of the FastFail
+	// view: its dial, read, write and pool-wait timeouts. A healthy local or
+	// in-cluster server answers in a few milliseconds, so this leaves room
+	// for a slow moment without letting a down server hold a request.
+	defaultFastFailTimeout = 200 * time.Millisecond
 )
 
 // defaultPoolSize returns the baseline connections-per-CPU pool go-redis uses,
@@ -82,6 +96,16 @@ type config struct {
 	minRetryBackoff time.Duration
 	maxRetryBackoff time.Duration
 
+	dialAttempts     int
+	dialRetryBackoff time.Duration
+
+	// poolTimeout is how long a call waits for a free pooled connection. Zero
+	// keeps the go-redis default (ReadTimeout + 1s); only the FastFail view
+	// sets it.
+	poolTimeout time.Duration
+
+	fastFailTimeout time.Duration
+
 	logger   Logger
 	observer Observer
 }
@@ -99,7 +123,26 @@ func defaults() config {
 		maxRetries:      defaultMaxRetries,
 		minRetryBackoff: defaultMinRetryBackoff,
 		maxRetryBackoff: defaultMaxRetryBackoff,
+
+		dialAttempts:     defaultDialAttempts,
+		dialRetryBackoff: defaultDialRetryBackoff,
+		fastFailTimeout:  defaultFastFailTimeout,
 	}
+}
+
+// fastFailConfig derives the FastFail view's configuration from the parent's:
+// the same target, auth, TLS, database, pool size and hooks, but no command
+// retries, a single dial attempt, and the fast-fail budget on every timeout.
+func (c *config) fastFailConfig() config {
+	ff := *c
+	ff.addrs = append([]string(nil), c.addrs...)
+	ff.maxRetries = 0
+	ff.dialAttempts = 1
+	ff.dialTimeout = c.fastFailTimeout
+	ff.readTimeout = c.fastFailTimeout
+	ff.writeTimeout = c.fastFailTimeout
+	ff.poolTimeout = c.fastFailTimeout
+	return ff
 }
 
 // Option configures a Client. Options are applied in order by Connect; a later
@@ -205,6 +248,38 @@ func WithRetry(attempts int, min, max time.Duration) Option {
 	}
 }
 
+// WithDialRetry tunes how hard each new connection is dialed: attempts is the
+// total number of dial tries (1 means a single try with no retry) and backoff
+// is the pause between them. The defaults, 5 attempts and 100ms, are the
+// go-redis values; together with WithRetry they decide how long a call takes
+// to fail while the server is down (at least (attempts-1) x backoff per
+// dial). Lowering them makes every call fail sooner but gives up on a server
+// that is only restarting; for a per-call choice, use Client.FastFail instead.
+// Non-positive values keep the defaults.
+func WithDialRetry(attempts int, backoff time.Duration) Option {
+	return func(c *config) {
+		if attempts > 0 {
+			c.dialAttempts = attempts
+		}
+		if backoff > 0 {
+			c.dialRetryBackoff = backoff
+		}
+	}
+}
+
+// WithFastFail sets the per-operation budget of the Client.FastFail view: its
+// dial, read, write and pool-wait timeouts (default 200ms). Pick a value
+// above the server's normal worst-case latency; a call that needs longer
+// fails on the view and should take the caller's fallback. A non-positive
+// value keeps the default.
+func WithFastFail(timeout time.Duration) Option {
+	return func(c *config) {
+		if timeout > 0 {
+			c.fastFailTimeout = timeout
+		}
+	}
+}
+
 // WithLogger installs a Logger for connection-level diagnostics (dial failures).
 // The default is a no-op; the core imposes no logging dependency.
 func WithLogger(l Logger) Option {
@@ -238,6 +313,34 @@ type Observer interface {
 	ObserveCommand(ctx context.Context, name string, dur time.Duration, err error)
 	// ObserveDial is called after each attempt to open a new connection.
 	ObserveDial(ctx context.Context, network, addr string, dur time.Duration, err error)
+}
+
+// String names the mode for log lines.
+func (m mode) String() string {
+	switch m {
+	case modeSentinel:
+		return "sentinel"
+	case modeCluster:
+		return "cluster"
+	default:
+		return "standalone"
+	}
+}
+
+// log returns the configured Logger, or the no-op one.
+func (c *config) log() Logger {
+	if c.logger == nil {
+		return nopLogger{}
+	}
+	return c.logger
+}
+
+// obs returns the configured Observer, or the no-op one.
+func (c *config) obs() Observer {
+	if c.observer == nil {
+		return nopObserver{}
+	}
+	return c.observer
 }
 
 // nopLogger is the default Logger; it discards everything.
@@ -279,6 +382,10 @@ func (c *config) standaloneOptions() *goredis.Options {
 		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
+
+		DialerRetries:      c.dialAttempts,
+		DialerRetryTimeout: c.dialRetryBackoff,
+		PoolTimeout:        c.poolTimeout,
 	}
 }
 
@@ -297,6 +404,10 @@ func (c *config) failoverOptions() *goredis.FailoverOptions {
 		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
+
+		DialerRetries:      c.dialAttempts,
+		DialerRetryTimeout: c.dialRetryBackoff,
+		PoolTimeout:        c.poolTimeout,
 	}
 }
 
@@ -314,5 +425,9 @@ func (c *config) clusterOptions() *goredis.ClusterOptions {
 		MaxRetries:      c.goRedisMaxRetries(),
 		MinRetryBackoff: c.minRetryBackoff,
 		MaxRetryBackoff: c.maxRetryBackoff,
+
+		DialerRetries:      c.dialAttempts,
+		DialerRetryTimeout: c.dialRetryBackoff,
+		PoolTimeout:        c.poolTimeout,
 	}
 }

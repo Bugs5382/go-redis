@@ -6,6 +6,12 @@
 // retries, TLS, and pluggable Logger/Observer hooks. The returned Client exposes
 // the underlying go-redis UniversalClient for the full command API.
 //
+// Client.FastFail returns a view of the same server for health probes and
+// fail-open paths: no command retries, a single dial attempt and a short
+// budget (WithFastFail), so a call fails in milliseconds while the server is
+// down instead of paying the default retries. WithDialRetry makes the go-redis
+// dial-retry defaults explicit and tunable.
+//
 // Nil, Cmdable, and UniversalClient re-export the handful of go-redis names a
 // caller needs to work with Client.Redis's return value -- the miss sentinel
 // and the command/client interfaces -- so a consumer of this package never
