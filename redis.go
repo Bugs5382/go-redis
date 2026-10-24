@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -57,6 +58,21 @@ type UniversalClient = goredis.UniversalClient
 // use by multiple goroutines.
 type Client struct {
 	uc goredis.UniversalClient
+	// st sits behind a pointer so Client stays a comparable struct, as it
+	// was before FastFail.
+	st *clientState
+}
+
+// clientState is a Client's configuration and its FastFail bookkeeping.
+type clientState struct {
+	cfg config
+
+	// parent is set on the FastFail view and nil on a client from Connect.
+	parent *Client
+
+	mu     sync.Mutex
+	closed bool
+	ff     *Client
 }
 
 // Connect builds a Redis client from the given options, applies the resilient
@@ -72,6 +88,17 @@ func Connect(ctx context.Context, opts ...Option) (*Client, error) {
 		opt(&cfg)
 	}
 
+	uc := newUniversal(&cfg)
+	if err := uc.Ping(ctx).Err(); err != nil {
+		_ = uc.Close()
+		return nil, fmt.Errorf("redis: ping on connect: %w", err)
+	}
+	return &Client{uc: uc, st: &clientState{cfg: cfg}}, nil
+}
+
+// newUniversal builds the go-redis client for cfg's mode and wires the
+// instrumentation hook. It does not dial; go-redis connects on first use.
+func newUniversal(cfg *config) goredis.UniversalClient {
 	var uc goredis.UniversalClient
 	switch cfg.mode {
 	case modeSentinel:
@@ -85,22 +112,9 @@ func Connect(ctx context.Context, opts ...Option) (*Client, error) {
 	// Only wire the instrumentation hook when the caller actually supplied a
 	// Logger or Observer, so the default path adds no per-command overhead.
 	if cfg.logger != nil || cfg.observer != nil {
-		log := cfg.logger
-		if log == nil {
-			log = nopLogger{}
-		}
-		obs := cfg.observer
-		if obs == nil {
-			obs = nopObserver{}
-		}
-		uc.AddHook(instHook{log: log, obs: obs})
+		uc.AddHook(instHook{log: cfg.log(), obs: cfg.obs()})
 	}
-
-	if err := uc.Ping(ctx).Err(); err != nil {
-		_ = uc.Close()
-		return nil, fmt.Errorf("redis: ping on connect: %w", err)
-	}
-	return &Client{uc: uc}, nil
+	return uc
 }
 
 // Redis returns the underlying client as the UniversalClient alias so callers
@@ -109,15 +123,80 @@ func Connect(ctx context.Context, opts ...Option) (*Client, error) {
 // owned by this Client; do not Close it directly -- use Client.Close.
 func (c *Client) Redis() UniversalClient { return c.uc }
 
-// Healthy reports whether the server answers a Ping within ctx. It is cheap and
-// suitable for readiness and liveness probes.
+// Healthy reports whether the server answers a Ping within ctx. On a Client
+// from Connect the Ping carries the normal retries, so while the server is
+// down it can take a second or more to say false; for a readiness probe use
+// c.FastFail().Healthy(ctx), which answers within the fast-fail budget.
 func (c *Client) Healthy(ctx context.Context) bool {
 	return c.uc.Ping(ctx).Err() == nil
 }
 
-// Close releases the connection pool. It is safe to call once; further use of
-// the Client after Close returns errors from go-redis.
-func (c *Client) Close() error { return c.uc.Close() }
+// FastFail returns a view of the same server that gives up quickly instead of
+// retrying: no command retries, a single dial attempt, and the WithFastFail
+// budget (default 200ms) as its dial, read, write and pool-wait timeouts.
+// While the server is down, a call through the view fails in about the time
+// it takes to be refused (or the budget, for a host that does not answer)
+// instead of the seconds the retrying path can spend.
+//
+// Use it where Redis is optional and the caller has a fallback: a cache read
+// that falls back to the source, a rate-limit check that lets the request
+// through, a readiness probe. The returned value is a *Client, so it plugs
+// into the toolkit packages (cache, ratelimit and the rest) unchanged.
+// Errors from the view are the usual go-redis errors; Transient reports true
+// for the ones that mean the server is unreachable.
+//
+// The view has its own small connection pool, built on the first call and
+// shared by every later call; it opens connections only when used. It inherits
+// the Logger and Observer given to Connect. The parent owns it: Close on the
+// view is a no-op, and closing the parent closes the view. FastFail on the
+// view returns the view.
+func (c *Client) FastFail() *Client {
+	st := c.st
+	if st.parent != nil {
+		return c
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.ff != nil {
+		return st.ff
+	}
+	ffCfg := st.cfg.fastFailConfig()
+	view := &Client{uc: newUniversal(&ffCfg), st: &clientState{cfg: ffCfg, parent: c}}
+	if st.closed {
+		// Keep the "use after Close returns ErrClosed" contract for a view
+		// asked for late, instead of handing out a live pool nobody closes.
+		_ = view.uc.Close()
+	}
+	st.ff = view
+	st.cfg.log().Printf(context.Background(),
+		"redis: fast-fail view built: mode=%s addrs=%d timeout=%s closed=%t",
+		st.cfg.mode, len(ffCfg.addrs), ffCfg.fastFailTimeout, st.closed)
+	return view
+}
+
+// Close releases the connection pool, and the FastFail view's pool when one
+// was built. It is safe to call once; further use of the Client after Close
+// returns errors from go-redis. On the FastFail view, Close does nothing: the
+// parent owns the view's pool.
+func (c *Client) Close() error {
+	st := c.st
+	if st.parent != nil {
+		return nil
+	}
+	st.mu.Lock()
+	st.closed = true
+	ff := st.ff
+	st.mu.Unlock()
+
+	err := c.uc.Close()
+	if ff != nil {
+		if ffErr := ff.uc.Close(); ffErr != nil && err == nil {
+			err = ffErr
+		}
+	}
+	st.cfg.log().Printf(context.Background(), "redis: client closed: fast-fail view=%t err=%v", ff != nil, err)
+	return err
+}
 
 // instHook adapts the pluggable Logger and Observer onto the go-redis Hook
 // interface, translating dials and commands into observer callbacks and logging

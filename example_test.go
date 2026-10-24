@@ -80,6 +80,36 @@ func ExampleConnect_sentinel() {
 // Name the command surface with this package's own alias -- Cmdable -- and
 // check a miss against the re-exported Nil sentinel. Neither line requires
 // importing github.com/redis/go-redis/v9.
+// Read through the fail-fast view and fall back when Redis is unavailable,
+// instead of waiting out the default retries.
+func ExampleClient_FastFail() {
+	ctx := context.Background()
+
+	client, err := redis.Connect(ctx,
+		redis.WithAddr("localhost:6379"),
+		redis.WithFastFail(100*time.Millisecond),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	ff := client.FastFail()
+	if !ff.Healthy(ctx) {
+		fmt.Println("not ready")
+	}
+
+	flag, err := ff.Redis().Get(ctx, "flags:new-checkout").Result()
+	switch {
+	case err == nil:
+		fmt.Println("flag:", flag)
+	case errors.Is(err, redis.Nil):
+		fmt.Println("flag not set")
+	default:
+		fmt.Println("flag store unavailable, using the default")
+	}
+}
+
 func ExampleClient_Redis() {
 	ctx := context.Background()
 

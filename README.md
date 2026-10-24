@@ -7,6 +7,7 @@
 ## ✨ Highlights
 
 - 🛟 **Resilient by default** — pool, timeouts, retries with backoff, sentinel failover and cluster from one `Connect`.
+- ⚡ **Fails fast when you ask** — `FastFail()` gives health probes and fail-open paths a view that gives up in milliseconds while Redis is down.
 - 🧰 **A toolkit on top** — Lua scripts, caching, streams, pub/sub, locks, idempotency keys and rate limiting, each in its own package.
 - 🪶 **Pay for what you import** — the core has no logging or telemetry dependency; the toolkit and `otel` live in subpackages.
 - 🔇 **Quiet unless asked** — every tool takes a go-log logger for generous diagnostics and discards everything by default.
@@ -82,18 +83,73 @@ client, _ := redis.Connect(ctx,
 	redis.WithPool(50),
 	redis.WithTimeouts(5*time.Second, 3*time.Second, 3*time.Second),
 	redis.WithRetry(3, 8*time.Millisecond, 512*time.Millisecond),
+	redis.WithDialRetry(5, 100*time.Millisecond),
+	redis.WithFastFail(200*time.Millisecond),
 )
 ```
 
+The retry defaults favour riding out a blip over failing quickly. Each new
+connection is dialed up to 5 times with 100ms between tries (the go-redis
+dial loop, made explicit by `WithDialRetry`), and each command is retried up
+to 3 times on top of that. While the server is down, one call through the
+default client can take well over a second to fail (about 1.7s against a
+refused port in the tests). That is the right trade for work that needs
+Redis, and the wrong one for work that can do without it; see
+[Failing open](#-failing-open) for the per-call answer instead of lowering
+the defaults for everyone.
+
 ## 💓 Health
 
-`Healthy` is a cheap Ping — wire it straight into a readiness or liveness probe.
+`Healthy` is a Ping. On the client from `Connect` it carries the normal
+retries, so while the server is down it can take a second or more to answer
+false. For a readiness probe, ask the fail-fast view, which answers within its
+budget:
 
 ```go
-if !client.Healthy(ctx) {
+if !client.FastFail().Healthy(ctx) {
 	// fail the probe
 }
 ```
+
+## ⚡ Failing open
+
+Some calls should skip Redis when it is down rather than wait for it: a cache
+read that can go to the source, a rate-limit check that can let the request
+through, a feature flag with a safe default. `FastFail()` returns a view of the
+same server with no command retries, a single dial try, and a short budget
+(200ms by default, set with `WithFastFail`) on its dial, read, write and
+pool-wait timeouts. While the server refuses connections, a call through the
+view fails in well under a millisecond.
+
+```go
+ff := client.FastFail()
+
+v, err := ff.Redis().Get(ctx, "flags:new-checkout").Result()
+switch {
+case err == nil:
+	return v == "on"
+case errors.Is(err, redis.Nil):
+	return false // not set
+default:
+	logger.Warn("flag store unavailable, using the default", "err", err)
+	return false // fail open
+}
+```
+
+The view is a `*redis.Client`, so the toolkit takes it as is:
+
+```go
+users := cache.New[User](client.FastFail()) // a down Redis falls through to the loader at once
+limiter := ratelimit.New(client.FastFail())  // decide what a limiter error means: allow or deny
+```
+
+A few things to know:
+
+- 🔁 **One view per client** — the view has its own connection pool, built on the first `FastFail()` call and opened only when used. Calling it again returns the same view.
+- 🧹 **The parent owns it** — `Close` on the view does nothing; closing the client closes both.
+- 🎯 **Pick the budget above your normal latency** — a slow but healthy server that needs longer than the budget fails on the view too, and the caller takes its fallback.
+- 🚫 **Not for writes that must land** — keep those on the retrying client, where a blip is ridden out instead of reported.
+- 🔍 **Telling down from broken** — `Transient(err)` is true for the errors that mean the server is unreachable, if a fallback should only cover those.
 
 ## ⏳ Waiting for the server at startup
 

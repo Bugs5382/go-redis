@@ -206,3 +206,108 @@ func TestOptionsMapping(t *testing.T) {
 		t.Errorf("clusterOptions wrong: %+v", co)
 	}
 }
+
+func TestDialRetryDefaultsAreExplicit(t *testing.T) {
+	t.Parallel()
+	c := defaults()
+	if c.dialAttempts != defaultDialAttempts || c.dialRetryBackoff != defaultDialRetryBackoff {
+		t.Errorf("dial retry = %d/%v, want %d/%v", c.dialAttempts, c.dialRetryBackoff,
+			defaultDialAttempts, defaultDialRetryBackoff)
+	}
+	if defaultDialAttempts != 5 || defaultDialRetryBackoff != 100*time.Millisecond {
+		t.Errorf("dial retry defaults moved off the go-redis values (5, 100ms): %d/%v",
+			defaultDialAttempts, defaultDialRetryBackoff)
+	}
+	if c.fastFailTimeout != defaultFastFailTimeout {
+		t.Errorf("fastFailTimeout = %v, want %v", c.fastFailTimeout, defaultFastFailTimeout)
+	}
+	so := c.standaloneOptions()
+	if so.DialerRetries != 5 || so.DialerRetryTimeout != 100*time.Millisecond {
+		t.Errorf("standalone dial retry = %d/%v, want 5/100ms", so.DialerRetries, so.DialerRetryTimeout)
+	}
+}
+
+func TestWithDialRetry(t *testing.T) {
+	t.Parallel()
+	c := apply(WithDialRetry(2, 30*time.Millisecond))
+	if c.dialAttempts != 2 || c.dialRetryBackoff != 30*time.Millisecond {
+		t.Errorf("WithDialRetry not applied: %d/%v", c.dialAttempts, c.dialRetryBackoff)
+	}
+	d := apply(WithDialRetry(0, -1))
+	if d.dialAttempts != defaultDialAttempts || d.dialRetryBackoff != defaultDialRetryBackoff {
+		t.Errorf("non-positive WithDialRetry changed the defaults: %d/%v", d.dialAttempts, d.dialRetryBackoff)
+	}
+	for name, opts := range map[string][]Option{
+		"standalone": {WithAddr("localhost:6379")},
+		"sentinel":   {WithSentinel("mymaster", "localhost:26379")},
+		"cluster":    {WithCluster("localhost:7000")},
+	} {
+		cfg := apply(append(opts, WithDialRetry(3, 40*time.Millisecond))...)
+		var attempts int
+		var backoff time.Duration
+		switch name {
+		case "standalone":
+			o := cfg.standaloneOptions()
+			attempts, backoff = o.DialerRetries, o.DialerRetryTimeout
+		case "sentinel":
+			o := cfg.failoverOptions()
+			attempts, backoff = o.DialerRetries, o.DialerRetryTimeout
+		case "cluster":
+			o := cfg.clusterOptions()
+			attempts, backoff = o.DialerRetries, o.DialerRetryTimeout
+		}
+		if attempts != 3 || backoff != 40*time.Millisecond {
+			t.Errorf("%s: dial retry = %d/%v, want 3/40ms", name, attempts, backoff)
+		}
+	}
+}
+
+func TestWithFastFail(t *testing.T) {
+	t.Parallel()
+	if c := apply(WithFastFail(75 * time.Millisecond)); c.fastFailTimeout != 75*time.Millisecond {
+		t.Errorf("WithFastFail not applied: %v", c.fastFailTimeout)
+	}
+	if c := apply(WithFastFail(0)); c.fastFailTimeout != defaultFastFailTimeout {
+		t.Errorf("WithFastFail(0) changed the default: %v", c.fastFailTimeout)
+	}
+}
+
+// TestFastFailConfig checks the view's settings reach go-redis in every mode:
+// no command retries, one dial attempt, and the budget on every timeout.
+func TestFastFailConfig(t *testing.T) {
+	t.Parallel()
+	const budget = 80 * time.Millisecond
+	for name, opts := range map[string][]Option{
+		"standalone": {WithAddr("localhost:6379")},
+		"sentinel":   {WithSentinel("mymaster", "localhost:26379")},
+		"cluster":    {WithCluster("localhost:7000")},
+	} {
+		parent := apply(append(opts, WithFastFail(budget), WithPassword("pw"), WithPool(7))...)
+		ff := parent.fastFailConfig()
+		if ff.mode != parent.mode || ff.password != "pw" || ff.poolSize != 7 {
+			t.Errorf("%s: view lost the parent's target or auth: %+v", name, ff)
+		}
+		var retries, dials int
+		var dial, read, write, pool time.Duration
+		switch name {
+		case "standalone":
+			o := ff.standaloneOptions()
+			retries, dials, dial, read, write, pool = o.MaxRetries, o.DialerRetries, o.DialTimeout, o.ReadTimeout, o.WriteTimeout, o.PoolTimeout
+		case "sentinel":
+			o := ff.failoverOptions()
+			retries, dials, dial, read, write, pool = o.MaxRetries, o.DialerRetries, o.DialTimeout, o.ReadTimeout, o.WriteTimeout, o.PoolTimeout
+		case "cluster":
+			o := ff.clusterOptions()
+			retries, dials, dial, read, write, pool = o.MaxRetries, o.DialerRetries, o.DialTimeout, o.ReadTimeout, o.WriteTimeout, o.PoolTimeout
+		}
+		if retries != -1 || dials != 1 {
+			t.Errorf("%s: view retries = %d, dial attempts = %d; want -1 and 1", name, retries, dials)
+		}
+		if dial != budget || read != budget || write != budget || pool != budget {
+			t.Errorf("%s: view timeouts = %v/%v/%v pool %v, want all %v", name, dial, read, write, pool, budget)
+		}
+	}
+	if p := apply(); p.standaloneOptions().PoolTimeout != 0 {
+		t.Error("the parent should keep the go-redis PoolTimeout default")
+	}
+}
