@@ -266,3 +266,87 @@ func TestClientRedisSatisfiesAliases(t *testing.T) {
 		t.Fatalf("Set via Cmdable alias: %v", err)
 	}
 }
+
+// TestConnectAsACLUser connects as a named user on a server that requires
+// one, and shows the password alone (the default user) is refused.
+func TestConnectAsACLUser(t *testing.T) {
+	t.Parallel()
+	m := newServer(t)
+	m.RequireUserAuth("svc", "pw")
+	ctx := context.Background()
+
+	c, err := Connect(ctx, WithAddr(m.Addr()), WithUsername("svc"), WithPassword("pw"))
+	if err != nil {
+		t.Fatalf("Connect as svc: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	if !c.FastFail().Healthy(ctx) {
+		t.Error("FastFail view not healthy as svc")
+	}
+
+	if c2, err := Connect(ctx, WithAddr(m.Addr()), WithPassword("pw"), WithRetry(0, 0, 0)); err == nil {
+		_ = c2.Close()
+		t.Fatal("Connect without a username succeeded, want an auth error")
+	}
+}
+
+// TestTxFailedErrIsGoredisTxFailedErr proves the re-exported sentinel matches
+// the upstream one under errors.Is.
+func TestTxFailedErrIsGoredisTxFailedErr(t *testing.T) {
+	t.Parallel()
+	if !errors.Is(goredis.TxFailedErr, TxFailedErr) {
+		t.Error("errors.Is(goredis.TxFailedErr, TxFailedErr) = false, want true")
+	}
+}
+
+// TestTransactionAndStreamAliases drives a WATCH transaction, a pipelined
+// stream write and a stream read naming only this package's aliases, the
+// shapes a caller needs without importing github.com/redis/go-redis/v9.
+func TestTransactionAndStreamAliases(t *testing.T) {
+	t.Parallel()
+	m := newServer(t)
+	ctx := context.Background()
+
+	c, err := Connect(ctx, WithAddr(m.Addr()))
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+	rdb := c.Redis()
+
+	err = rdb.Watch(ctx, func(tx *Tx) error {
+		var cmds []Cmder
+		cmds, err := tx.TxPipelined(ctx, func(p Pipeliner) error {
+			p.Set(ctx, "head", "h1", 0)
+			p.XAdd(ctx, &XAddArgs{Stream: "audit", ID: "*", Values: map[string]any{"hash": "h1"}})
+			return nil
+		})
+		if len(cmds) != 2 {
+			t.Errorf("TxPipelined returned %d commands, want 2", len(cmds))
+		}
+		return err
+	}, "head")
+	if err != nil {
+		t.Fatalf("Watch: %v", err)
+	}
+
+	var (
+		msgs *XMessageSliceCmd
+		head *StringCmd
+	)
+	if _, err := rdb.TxPipelined(ctx, func(p Pipeliner) error {
+		msgs = p.XRange(ctx, "audit", "-", "+")
+		head = p.Get(ctx, "head")
+		return nil
+	}); err != nil {
+		t.Fatalf("TxPipelined read: %v", err)
+	}
+	hash := func(m XMessage) any { return m.Values["hash"] }
+	got := msgs.Val()
+	if len(got) != 1 || hash(got[0]) != "h1" {
+		t.Errorf("XRange = %+v, want one entry with hash h1", got)
+	}
+	if head.Val() != "h1" {
+		t.Errorf("head = %q, want h1", head.Val())
+	}
+}

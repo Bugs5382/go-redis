@@ -29,9 +29,13 @@ The public surface is small and additive; keep it stable:
   and pool timeouts. For health probes and fail-open paths. The parent owns it (`Close` on the view
   is a no-op); it inherits the Logger/Observer hook, but `otel.Instrument` is per `*Client`.
 - Options: `WithAddr`, `WithSentinel(master, addrs...)` (the HA path), `WithCluster`, `WithPassword`,
-  `WithDB`, `WithTLS`, `WithPool`, `WithTimeouts(dial, read, write)`, `WithRetry(attempts, min, max)`,
+  `WithUsername` (the ACL user sent with the password; standalone, cluster, and the sentinel-managed
+  master and replicas, not the sentinels), `WithDB`, `WithTLS`, `WithPool`, `WithTimeouts(dial, read, write)`, `WithRetry(attempts, min, max)`,
   `WithDialRetry(attempts, backoff)` (the go-redis dial loop; defaults 5 and 100ms, set explicitly),
   `WithFastFail(timeout)`, `WithLogger`, `WithObserver`. Non-positive tuning values keep the default; the last mode option wins.
+- Re-exported aliases so callers never import `github.com/redis/go-redis/v9`: `Nil`, `TxFailedErr`
+  (variables), `Cmdable`, `UniversalClient`, `Tx`, `Pipeliner`, `Cmder`, `StringCmd`, `XAddArgs`,
+  `XMessage`, `XMessageSliceCmd` (type aliases). Add one only when a caller needs to name it.
 - `Logger` and `Observer` are minimal, default to no-ops, and impose no logging/telemetry dependency.
 - The `otel` subpackage adds OpenTelemetry tracing and metrics via `Instrument`, keeping the
   OpenTelemetry dependency out of the core.
