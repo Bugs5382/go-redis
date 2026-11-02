@@ -27,6 +27,7 @@ OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"io"
 	"net"
@@ -82,6 +83,51 @@ func TestIntegrationRoundTrip(t *testing.T) {
 	}
 	if got != "ok" {
 		t.Fatalf("Get = %q, want %q", got, "ok")
+	}
+}
+
+// TestIntegrationACLUser creates an ACL user on a real server and connects as
+// it with WithUsername, then checks the user's rules apply: a key outside its
+// pattern is refused.
+func TestIntegrationACLUser(t *testing.T) {
+	addr := redisAddr(t)
+	ctx := context.Background()
+
+	admin, err := Connect(ctx, WithAddr(addr))
+	if err != nil {
+		t.Fatalf("Connect admin: %v", err)
+	}
+	defer func() { _ = admin.Close() }()
+
+	const user = "go-redis-acl-test"
+	pass := rand.Text()
+	if err := admin.Redis().Do(ctx, "ACL", "SETUSER", user, "reset", "on", ">"+pass, "~acl:*", "+@all").Err(); err != nil {
+		t.Fatalf("ACL SETUSER: %v", err)
+	}
+	t.Cleanup(func() { _ = admin.Redis().Do(context.Background(), "ACL", "DELUSER", user).Err() })
+
+	c, err := Connect(ctx, WithAddr(addr), WithUsername(user), WithPassword(pass))
+	if err != nil {
+		t.Fatalf("Connect as %s: %v", user, err)
+	}
+	defer func() { _ = c.Close() }()
+
+	who, err := c.Redis().Do(ctx, "ACL", "WHOAMI").Text()
+	if err != nil || who != user {
+		t.Fatalf("ACL WHOAMI = %q, %v; want %q", who, err, user)
+	}
+	if err := c.Redis().Set(ctx, "acl:ok", "v", time.Minute).Err(); err != nil {
+		t.Fatalf("Set inside the user's pattern: %v", err)
+	}
+	if err := c.Redis().Set(ctx, "other:key", "v", time.Minute).Err(); err == nil {
+		t.Fatal("Set outside the user's pattern succeeded, want NOPERM")
+	}
+	if !c.FastFail().Healthy(ctx) {
+		t.Error("FastFail view not healthy as the ACL user")
+	}
+
+	if _, err := Connect(ctx, WithAddr(addr), WithUsername(user), WithPassword("wrong"), WithRetry(0, 0, 0)); err == nil {
+		t.Fatal("Connect with a wrong password succeeded, want WRONGPASS")
 	}
 }
 

@@ -52,6 +52,29 @@ if errors.Is(err, redis.Nil) {
 }
 ```
 
+Transactions, pipelines and streams get the same treatment. `TxFailedErr`,
+`Tx`, `Pipeliner`, `Cmder`, `StringCmd`, `XAddArgs`, `XMessage` and
+`XMessageSliceCmd` are aliases of the go-redis names, so an optimistic
+`WATCH` loop needs nothing else:
+
+```go
+err := client.Redis().Watch(ctx, func(tx *redis.Tx) error {
+	n, err := tx.Get(ctx, "audit:head").Result()
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return err
+	}
+	_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+		p.XAdd(ctx, &redis.XAddArgs{Stream: "audit", ID: "*", Values: map[string]any{"prev": n}})
+		p.Set(ctx, "audit:head", "next", 0)
+		return nil
+	})
+	return err
+}, "audit:head")
+if errors.Is(err, redis.TxFailedErr) {
+	// another writer got there first: retry
+}
+```
+
 ## 🛟 High availability
 
 Point at Redis Sentinel for automatic failover — the client discovers the
@@ -77,6 +100,7 @@ Every knob is a functional option, and every one has a resilient default.
 ```go
 client, _ := redis.Connect(ctx,
 	redis.WithAddr("localhost:6379"),
+	redis.WithUsername("orders-svc"), // an ACL user; leave unset for the default user
 	redis.WithPassword("s3cret"),
 	redis.WithDB(0),
 	redis.WithTLS(&tls.Config{}),
@@ -97,6 +121,27 @@ refused port in the tests). That is the right trade for work that needs
 Redis, and the wrong one for work that can do without it; see
 [Failing open](#-failing-open) for the per-call answer instead of lowering
 the defaults for everyone.
+
+## 🔐 ACL users
+
+On Redis 6+ or Valkey, give each service its own ACL user with only the keys
+and commands it needs, and connect as it. `WithUsername` sends the user with
+the `WithPassword` password on every connection: standalone, cluster, the
+sentinel-managed master and replicas, and the `FastFail` view. The sentinels
+themselves are not authenticated.
+
+```go
+// ACL SETUSER orders-svc on >s3cret ~orders:* +@all -@dangerous
+client, err := redis.Connect(ctx,
+	redis.WithAddr("cache.example.org:6379"),
+	redis.WithUsername("orders-svc"),
+	redis.WithPassword("s3cret"),
+)
+```
+
+Without a username the password authenticates the server's `default` user, as
+before. A wrong user or password fails `Connect` with `WRONGPASS`, which
+`WaitFor` returns at once instead of retrying.
 
 ## 💓 Health
 

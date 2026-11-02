@@ -125,3 +125,46 @@ func ExampleClient_Redis() {
 		fmt.Println("cache miss")
 	}
 }
+
+// Connect as a named ACL user instead of the server's default user.
+func ExampleWithUsername() {
+	ctx := context.Background()
+
+	client, err := redis.Connect(ctx,
+		redis.WithAddr("cache.example.org:6379"),
+		redis.WithUsername("orders-svc"),
+		redis.WithPassword("s3cret"),
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+}
+
+// An optimistic WATCH transaction that appends to a stream, written with this
+// package's aliases only.
+func ExampleTx() {
+	ctx := context.Background()
+
+	client, err := redis.Connect(ctx, redis.WithAddr("localhost:6379"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+
+	err = client.Redis().Watch(ctx, func(tx *redis.Tx) error {
+		n, err := tx.Get(ctx, "audit:head").Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			return err
+		}
+		_, err = tx.TxPipelined(ctx, func(p redis.Pipeliner) error {
+			p.XAdd(ctx, &redis.XAddArgs{Stream: "audit", ID: "*", Values: map[string]any{"prev": n}})
+			p.Set(ctx, "audit:head", "next", 0)
+			return nil
+		})
+		return err
+	}, "audit:head")
+	if errors.Is(err, redis.TxFailedErr) {
+		fmt.Println("another writer got there first: retry")
+	}
+}

@@ -52,6 +52,44 @@ type Cmdable = goredis.Cmdable
 // exposes hooks, transactions, pub/sub, and pool stats.
 type UniversalClient = goredis.UniversalClient
 
+// TxFailedErr is the error a WATCH transaction returns when a watched key
+// changed before EXEC, so nothing was written and the caller may retry. It is
+// re-exported so a caller can write errors.Is(err, redis.TxFailedErr) without
+// importing github.com/redis/go-redis/v9 directly.
+var TxFailedErr = goredis.TxFailedErr
+
+// Tx is the connection UniversalClient.Watch hands its callback: commands on
+// it read the watched keys, and its TxPipelined queues the MULTI/EXEC writes.
+// Re-exported as a type alias so the callback can be written without the
+// upstream import.
+type Tx = goredis.Tx
+
+// Pipeliner is the queue a Pipelined or TxPipelined callback adds commands
+// to. Re-exported as a type alias so the callback can be written without the
+// upstream import.
+type Pipeliner = goredis.Pipeliner
+
+// Cmder is any queued or executed command, as Pipelined and TxPipelined
+// return them. Re-exported as a type alias.
+type Cmder = goredis.Cmder
+
+// StringCmd is the result of a command that replies with one string (GET and
+// friends), for holding a pipelined result until the pipeline runs.
+// Re-exported as a type alias.
+type StringCmd = goredis.StringCmd
+
+// XAddArgs are the arguments to XADD (the stream, the entry ID or "*", the
+// field values and the optional trimming). Re-exported as a type alias.
+type XAddArgs = goredis.XAddArgs
+
+// XMessage is one stream entry, its ID and field values, as XRANGE and
+// XREAD return them. Re-exported as a type alias.
+type XMessage = goredis.XMessage
+
+// XMessageSliceCmd is the result of XRANGE and XREVRANGE, for holding a
+// pipelined result until the pipeline runs. Re-exported as a type alias.
+type XMessageSliceCmd = goredis.XMessageSliceCmd
+
 // Client is a thin, resilient wrapper over a go-redis UniversalClient. Build one
 // with Connect; use Redis to reach the full go-redis command API, Healthy for a
 // liveness probe, and Close to release the pool. A Client is safe for concurrent

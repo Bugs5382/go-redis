@@ -83,6 +83,7 @@ type config struct {
 	mode       mode
 	addrs      []string
 	masterName string
+	username   string
 	password   string
 	db         int
 	tlsConfig  *tls.Config
@@ -190,6 +191,16 @@ func WithCluster(addrs ...string) Option {
 // WithPassword sets the AUTH password. Leave unset for an unauthenticated server.
 func WithPassword(password string) Option {
 	return func(c *config) { c.password = password }
+}
+
+// WithUsername sets the ACL user (Redis 6+, Valkey) that authenticates with
+// the WithPassword password, so a service can run under its own
+// least-privilege account instead of the server's default user. It applies to
+// standalone, cluster and sentinel connections (the master and replicas the
+// sentinels point to; the sentinels themselves are not authenticated). Leave
+// it unset, or pass "", to AUTH with the password alone as the default user.
+func WithUsername(username string) Option {
+	return func(c *config) { c.username = username }
 }
 
 // WithDB selects the logical database index. Ignored in cluster mode.
@@ -372,6 +383,7 @@ func (c *config) standaloneOptions() *goredis.Options {
 	}
 	return &goredis.Options{
 		Addr:            addr,
+		Username:        c.username,
 		Password:        c.password,
 		DB:              c.db,
 		TLSConfig:       c.tlsConfig,
@@ -394,6 +406,7 @@ func (c *config) failoverOptions() *goredis.FailoverOptions {
 	return &goredis.FailoverOptions{
 		MasterName:      c.masterName,
 		SentinelAddrs:   c.addrs,
+		Username:        c.username,
 		Password:        c.password,
 		DB:              c.db,
 		TLSConfig:       c.tlsConfig,
@@ -416,6 +429,7 @@ func (c *config) failoverOptions() *goredis.FailoverOptions {
 func (c *config) clusterOptions() *goredis.ClusterOptions {
 	return &goredis.ClusterOptions{
 		Addrs:           c.addrs,
+		Username:        c.username,
 		Password:        c.password,
 		TLSConfig:       c.tlsConfig,
 		PoolSize:        c.poolSize,

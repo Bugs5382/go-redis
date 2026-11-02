@@ -207,6 +207,43 @@ func TestOptionsMapping(t *testing.T) {
 	}
 }
 
+// TestWithUsername proves the ACL username reaches every go-redis options
+// struct next to the password, and the FastFail view inherits it.
+func TestWithUsername(t *testing.T) {
+	t.Parallel()
+	def := apply()
+	if got := def.standaloneOptions().Username; got != "" {
+		t.Errorf("default Username = %q, want empty (the server's default user)", got)
+	}
+
+	sc := apply(WithAddr("host:6379"), WithUsername("svc"), WithPassword("pw"))
+	so := sc.standaloneOptions()
+	if so.Username != "svc" || so.Password != "pw" {
+		t.Errorf("standaloneOptions auth = %q/%q, want svc/pw", so.Username, so.Password)
+	}
+
+	fc := apply(WithSentinel("mymaster", "s1:26379"), WithUsername("svc"), WithPassword("pw"))
+	fo := fc.failoverOptions()
+	if fo.Username != "svc" || fo.Password != "pw" {
+		t.Errorf("failoverOptions auth = %q/%q, want svc/pw", fo.Username, fo.Password)
+	}
+	if fo.SentinelUsername != "" || fo.SentinelPassword != "" {
+		t.Errorf("failoverOptions sentinel auth = %q/%q, want empty", fo.SentinelUsername, fo.SentinelPassword)
+	}
+
+	cc := apply(WithCluster("n1:6379"), WithUsername("svc"), WithPassword("pw"))
+	co := cc.clusterOptions()
+	if co.Username != "svc" || co.Password != "pw" {
+		t.Errorf("clusterOptions auth = %q/%q, want svc/pw", co.Username, co.Password)
+	}
+
+	parent := apply(WithUsername("svc"), WithPassword("pw"))
+	ff := parent.fastFailConfig()
+	if got := ff.standaloneOptions().Username; got != "svc" {
+		t.Errorf("FastFail Username = %q, want svc", got)
+	}
+}
+
 func TestDialRetryDefaultsAreExplicit(t *testing.T) {
 	t.Parallel()
 	c := defaults()
